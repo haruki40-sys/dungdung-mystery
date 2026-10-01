@@ -208,24 +208,7 @@
     $("#sceneVisual").style.backgroundPosition=visual.position || "center";
   }
 
-  function renderScene(id){
-    const scene=game.scenes[id];
-    if(!scene) throw new Error(`장면을 찾을 수 없습니다: ${id}`);
-    scene.id=id;
-    state.scene=id;
-    if(!state.visited.includes(id)) state.visited.push(id);
-    applyEffects(scene.effects);
-    updateVisual(scene);
-    renderHotspots(scene);
-    if(scene.solve) renderSolve(scene);
-    else {
-      const header=scene.interview ? renderInterviewHeader(scene) : "";
-      $("#story").innerHTML=header+(scene.blocks || []).map(renderBlock).join("");
-      renderActions(scene.actions || []);
-    }
-    saveState();
-    window.scrollTo({top:0,behavior:"smooth"});
-  }
+  function renderScene(id){frameRender(id);}
 
   function renderSolve(scene){
     const solve=scene.solve;
@@ -291,6 +274,7 @@
   function hideModal(){ $("#modal").classList.add("hidden"); }
 
   function openNotebook(){
+    TheatreUI.openBook("단서"); return;
     const items=clueIds.map((id,index)=>{
       const found=state.clues.includes(id);
       const clue=game.clues[id];
@@ -300,6 +284,7 @@
   }
 
   function openSuspects(){
+    TheatreUI.openBook("인물"); return;
     const cards=(game.suspects || []).map(person=>{
       const status=(person.status || []).map(item=>`<div>${item.label}</div><div>${!item.whenFlag || state.flags[item.whenFlag]?fill(item.value):(item.unknown || "미확인")}</div>`).join("");
       return `<article class="suspect-item"><div class="suspect-portrait"><img src="${person.portrait}" alt="${person.name} 인물화"></div><div class="suspect-detail"><b>${person.name}</b><span>${person.role}</span><div class="suspect-grid">${status}</div></div></article>`;
@@ -308,20 +293,22 @@
   }
 
   function openStatus(){
+    TheatreUI.openBook("장소"); return;
     const visitedLabels=state.visited.map(id=>game.scenes[id]?.shortLabel).filter(Boolean);
     const tags=visitedLabels.length?visitedLabels.map(label=>`<span class="status-tag">${label}</span>`).join(""):'<span class="status-tag status-tag--empty">아직 없음</span>';
     showModal(`<h2>수사 현황</h2><p>${state.solved?"사건 해결을 완료했습니다.":"수사 기록이 이 브라우저에 자동 저장되고 있습니다."}</p><div class="status-overview"><div class="status-score"><span>확보 단서</span><b>${state.clues.length}/${clueIds.length}</b></div><div class="status-summary"><span>${game.progressAxes?.length?"수사 축":"전체 진행률"}</span><strong>${tokenValue("progressCount")}/${tokenValue("progressTotal")}</strong><div class="status-meter"><i style="width:${tokenValue("progress")}%"></i></div></div></div><div class="status-section"><span>방문한 장면</span><div class="status-tags">${tags}</div></div>`,"수사 현황");
   }
 
   function openTimeline(){
+    TheatreUI.openBook("시간선"); return;
     const rows=(game.timeline || []).filter(item=>meets(item.requires)).sort((a,b)=>a.time.localeCompare(b.time)).map(item=>`<li><b>${item.time}</b><span>${fill(item.text)}</span></li>`).join("");
     showModal(`<h2>사건 시간표</h2><p>${fill(game.labels?.timelineIntro || "확인된 주요 시각입니다.")}</p><ol class="timeline-mini">${rows}</ol>`,"사건 시간표");
   }
 
   function bindShell(){
     document.title=`${game.meta.id} · ${game.meta.title}`;
-    $("#brandEyebrow").textContent=game.meta.series || "MYSTERY FILE";
-    $("#brandCase").textContent=game.meta.id;
+    $("#brandEyebrow").textContent="둥둥 추리극장";
+    $("#brandCase").textContent=game.meta.id+" · "+game.meta.title;
     $("#footerCase").textContent=`${game.meta.series || "MYSTERY FILE"} · ${game.meta.id}`;
     $("#footerVersion").textContent=`${game.meta.title} v${game.meta.version}`;
     $("#notebookBtn").addEventListener("click",openNotebook);
@@ -336,6 +323,20 @@
       renderScene(state.started?(game.hubScene || "hub"):(game.entryScene || "intro"));
     });
   }
+
+// View-only adapter. meets(), applyEffects(), runAction() and renderSolve() remain authoritative.
+const roomEntries=Object.entries(game.scenes).filter(([,s])=>(s.blocks||[]).some(b=>b.type==='roomBrief'));
+function frameLocations(){return roomEntries.map(([id,s])=>({id,name:s.shortLabel,image:s.visual.image,run:()=>renderScene(id),visited:state.visited.includes(id),clueIds:s.blocks.find(b=>b.type==='roomBrief').clues,description:s.blocks.find(b=>b.type==='roomBrief').text}));}
+function frameAnswer(scene){const dialogue=scene.blocks.find(b=>b.type==='dialogue');const answer=(dialogue?.lines||[]).filter(l=>l.speaker!=='detective').map(l=>fill(l.text)).join('<br>');const thought=scene.blocks.filter(b=>b.type==='paragraph'||b.type==='thought'||b.type==='comparison').map(b=>fill(b.html||b.text)).join('<br>');return `<p class="answer-text">${answer}</p><aside class="detective-thought"><span>탐정의 생각</span><p>${thought}</p></aside>`;}
+function frameRender(id){const scene=game.scenes[id];if(!scene)throw new Error('장면을 찾을 수 없습니다: '+id);scene.id=id;state.scene=id;if(!state.visited.includes(id))state.visited.push(id);applyEffects(scene.effects);
+ let display=scene,inline=null,result=null;const dialogue=scene.blocks?.find(b=>b.type==='dialogue');if(dialogue){const parentId=scene.actions[0].goto;display=game.scenes[parentId];display.id=parentId;inline={key:id,html:frameAnswer(scene)};}else if(scene.blocks?.some(b=>b.type==='clue')&&roomEntries.some(([rid])=>rid===scene.actions?.[0]?.goto)){const parentId=scene.actions[0].goto;display=game.scenes[parentId];display.id=parentId;result=scene.blocks;}
+ const visual={...game.visual,...display.visual};const room=frameLocations().find(p=>p.id===display.id)||frameLocations().find(p=>p.image===visual.image);const title=display.interview?game.suspects.find(p=>p.id===display.interview.person).name:roomEntries.some(([rid])=>rid===display.id)?display.shortLabel:display.blocks?.find(b=>b.type==='heading')?.text||visual.title;
+ const choice=a=>{const target=game.scenes[a.goto];const flags=target?.effects?.setFlags||[];const isQuestion=!!display.interview&&!!target?.blocks?.find(b=>b.type==='dialogue');const photo=frameLocations().find(p=>p.id===a.goto)||game.suspects.find(p=>a.goto==='interview_'+p.id);return {label:renderActionLabel(!meets(a.requires)&&a.lockedDescription?{...a,description:a.lockedDescription}:a),key:a.goto,run:()=>runAction(a),locked:!meets(a.requires),done:isQuestion&&flags.length>0&&flags.every(f=>state.flags[f]),kind:isQuestion?'question':a.kind,primary:a.primary,group:a.group,image:id==='hub'?photo?.image||photo?.portrait:null};};
+ TheatreUI.render({id,state,label:display.label,kind:id==='hub'?'hub':display.interview?'interview':display.layout,title,html:[...(display.blocks||[]).filter(block=>!result||block.type!=='thought'),...(result||[])].map(renderBlock).join(''),person:display.interview?renderInterviewHeader(display):null,answer:inline,choices:(result?scene.actions:display.actions||[]).map(choice),image:visual.image,position:visual.position,placeId:display.interview?null:room?.id,spots:(display.hotspots||[]).map(p=>({...p,run:()=>runAction(p),done:(p.foundClues||[]).every(c=>state.clues.includes(c)),key:p.goto,locked:!meets(p.requires)})),objective:display.hotspots?.length?'현장에 남은 기록을 직접 확인하세요.':null});
+ updateVisual(scene);if(scene.solve){$('#sceneVisual').hidden=true;renderSolve(scene);TheatreUI.enhanceSolve();}saveState();
+}
+function frameRecords(){const e=TheatreUI.escape;const known=state.clues.map(id=>({id,name:game.clues[id].title,text:game.clues[id].detail||game.clues[id].summary}));const statements=Object.entries(game.scenes).filter(([,s])=>s.blocks?.some(b=>b.type==='dialogue')&&(s.effects?.setFlags||[]).length&&(s.effects.setFlags).every(f=>state.flags[f])).map(([id,s])=>{const b=s.blocks.find(b=>b.type==='dialogue'),p=game.suspects.find(p=>p.id===b.suspect);return {name:p?.name||'인물',question:fill(b.lines.find(l=>l.speaker==='detective').text),html:frameAnswer(s)};});return {clues:known,people:game.suspects.map(p=>({name:p.name,role:p.role,image:p.portrait,html:'<dl>'+p.status.map(s=>`<dt>${e(s.label)}</dt><dd>${!s.whenFlag||state.flags[s.whenFlag]?fill(s.value):e(s.unknown||'미확인')}</dd>`).join('')+'</dl>'+statements.filter(s=>s.name===p.name).map(s=>`<div class="linked-clue"><b>${s.question}</b>${s.html}</div>`).join('')})),places:frameLocations().map(p=>({...p,role:p.visited?'방문한 장소':'조사 가능한 장소',html:`<p>${e(p.description)}</p>`+known.filter(c=>p.clueIds.includes(c.id)).map(c=>`<div class="linked-clue"><b>${e(c.name)}</b><small>${e(c.text)}</small></div>`).join('')})),statements,timeline:game.timeline.filter(t=>meets(t.requires)).sort((a,b)=>a.time.localeCompare(b.time)).map(t=>({time:t.time,text:fill(t.text)}))};}
+TheatreUI.setup({caseId:game.meta.id,title:game.meta.title,detective:game.assets.detective,locations:frameLocations,people:()=>game.suspects.map(person=>({...person,image:person.portrait,run:()=>renderScene('interview_'+person.id)})),records:frameRecords,hub:()=>renderScene('hub'),solve:()=>renderScene('solve')});
 
   bindShell();
   const startScene=state.solved && game.endingScene ? game.endingScene : (game.scenes[state.scene]?state.scene:(game.entryScene || "intro"));

@@ -138,34 +138,7 @@ function getChoiceKind(choice){
   return "action";
 }
 
-function setScene(id, html, choices, label="수사 진행"){
-  state.scene=id;
-  $("#chapterLabel").textContent=label;
-  updateSceneVisual(id, label);
-  $("#story").innerHTML=html;
-  $("#choices").innerHTML="";
-  let activeGroup="";
-  choices.forEach(c=>{
-    if(c.group && c.group!==activeGroup){
-      const heading=document.createElement("div");
-      heading.className=`choice-group-heading choice-group-heading--${c.groupKey || "default"}`;
-      heading.innerHTML=`<span aria-hidden="true">${c.groupIcon || ""}</span><div><b>${c.group}</b>${c.groupDesc?`<small>${c.groupDesc}</small>`:""}</div>`;
-      $("#choices").appendChild(heading);
-      activeGroup=c.group;
-    }
-    const b=document.createElement("button");
-    b.innerHTML=c.label;
-    if(c.groupKey) b.classList.add(`choice--${c.groupKey}`);
-    b.classList.add(`choice--${getChoiceKind(c)}`);
-    if(c.primary) b.classList.add("primary");
-    if(c.locked){ b.classList.add("locked"); b.disabled=true; }
-    b.addEventListener("click", c.action);
-    $("#choices").appendChild(b);
-  });
-  renderHotspots(id);
-  saveState();
-  window.scrollTo({top:0, behavior:"smooth"});
-}
+function setScene(id,html,choices,label="수사 진행"){ frameScene(id,html,choices,label); }
 
 const sceneHotspots = {
   music: [
@@ -844,6 +817,7 @@ function ending(){
 }
 
 function openNotebook(){
+  TheatreUI.openBook("단서"); return;
   const items = Object.entries(clues).map(([n,t])=>{
     const found=state.clues.includes(Number(n));
     return `<div class="note-item" style="opacity:${found?1:.35}">
@@ -853,6 +827,7 @@ function openNotebook(){
   showModal(`<h2>📒 탐정수첩</h2><p>확보한 단서 ${state.clues.length}/24</p><div class="notebook-list">${items}</div>`);
 }
 function openSuspects(){
+  TheatreUI.openBook("인물"); return;
   const seen = state.visited;
   const data = [
     {name:"박민호",role:"관리자",motive:seen.park?"동기 약함":"미확인",alibi:seen.park?"신발 패턴 불일치":"미확인",image:"portrait-park-minho.png"},
@@ -866,6 +841,7 @@ function openSuspects(){
 }
 
 function openStatus(){
+  TheatreUI.openBook("장소"); return;
   const progress = Math.round((state.clues.length / 24) * 100);
   const locations = [];
   const people = [];
@@ -905,6 +881,7 @@ function openStatus(){
 }
 
 function openTimeline(){
+  TheatreUI.openBook("시간선"); return;
   showModal(`
     <h2>사건 시간표</h2>
     <p>사건이 확인되기 전후의 주요 출입 기록입니다.</p>
@@ -924,6 +901,40 @@ function showModal(html, label="상세 정보"){
   $("#modal").classList.remove("hidden");
 }
 function hideModal(){ $("#modal").classList.add("hidden"); }
+
+// Presentation adapter. Investigation effects, unlock conditions, save schema and verdict stay in game.js.
+let frameCapture=false,frameCaptured=null;
+const frameTitles=['음악실 출입 기록','보관함 구조','보관함의 흰 가루','젖은 신발 자국','6페이지 뒤 메모','검은 섬유','흰 가루 감식','검은 섬유 감식','신발 자국 정밀 조사','Ending B','비상 마스터카드','박민호 신발 비교','메모 작성자','로진의 시점','한유라 연습 녹음','악보 보관 시각','촬영 요청','서지안 영상통화','수정된 알리바이','이태준 신발 비교','먼저 꺼낸 촬영 이야기','복구된 사진','사진 속 카드','7페이지의 행방'];
+const framePeople=[
+ {id:'park',name:'박민호',role:'문라이트 하우스 관리자',image:'assets/portrait-park-minho.png',run:parkMinho},
+ {id:'yura',name:'한유라',role:'바이올리니스트',image:'assets/portrait-han-yura.png',run:hanYura},
+ {id:'jian',name:'서지안',role:'피아니스트',image:'assets/portrait-seo-jian.png',run:seoJian},
+ {id:'tae',name:'이태준',role:'공연 사진작가',image:'assets/portrait-lee-taejun-v2.png',run:leeTaejun}
+];
+function frameLocations(){return [
+ {id:'music',name:'음악실',image:'assets/moonlight-music-room.png',run:musicRoom,visited:state.visited.music,clueIds:[1,2,3,4,5,6,7,8,9,10],description:'악보가 사라진 현장. 출입 기록과 보관함 주변의 흔적을 조사합니다.'},
+ {id:'lobby',name:'로비',image:'assets/moonlight-lobby.png',run:lobby,visited:state.visited.lobby,clueIds:[1],description:'관리 데스크와 비상카드 보관함, 배송 구역과 출입 단말을 확인합니다.'}
+];}
+function frameAnswer(html){const t=document.createElement('div');t.innerHTML=html;const answer=t.querySelector('.dialogue--suspect');answer?.querySelector('span')?.remove();const thought=t.querySelector('.detective-thought');const compare=t.querySelector('.comparison-result');if(compare&&thought)thought.append(compare);return `<p class="answer-text">${answer?.innerHTML||''}</p>${thought?.outerHTML||''}`;}
+function frameScene(id,html,choices,label){
+ if(frameCapture){frameCaptured={id,html,choices,label};return;}
+ state.scene=id;let actual={id,html,choices,label},inline=null,result=null;
+ if(html.includes('dialogue-scene')){const key=Object.keys(window.CASE001_STATEMENTS).find(k=>window.CASE001_STATEMENTS[k].id===id);frameCapture=true;try{choices[0].action();actual=frameCaptured;}finally{frameCapture=false;frameCaptured=null;}state.scene=id;inline={key,html:frameAnswer(html)};}
+ const back=choices.find(c=>[musicRoom,lobby].includes(c.action));const roomResult=id.startsWith('music-')||id.startsWith('lobby-')||['powder','fiber','shoe','memo'].includes(id);if(!inline&&back&&roomResult){frameCapture=true;try{back.action();const parent=frameCaptured;if(parent){result=html;const context=document.createElement('div');context.innerHTML=parent.html;context.querySelectorAll('.detective-thought').forEach(node=>node.remove());actual={...parent,html:context.innerHTML+html,choices};}}finally{frameCapture=false;frameCaptured=null;}state.scene=id;}
+ const person=framePeople.find(p=>p.id===actual.id);const temp=document.createElement('div');temp.innerHTML=actual.html;const heading=temp.querySelector('h2');const placeId=actual.id==='music'||actual.id.startsWith('music-')||['powder','fiber','shoe','memo'].includes(actual.id)?'music':actual.id.startsWith('lobby')?'lobby':null;
+ const location=frameLocations().find(p=>p.id===placeId);let title=actual.id==='music'?'음악실':actual.id==='lobby'?'로비':heading?.innerHTML||sceneVisuals[actual.id]?.title||label;
+ const toChoice=c=>{const key=c.action?.name||'';const flag=key.startsWith('ask')?key[3].toLowerCase()+key.slice(4):null;const photo=frameLocations().find(p=>p.run===c.action)||framePeople.find(p=>p.run===c.action);return {label:c.label,run:c.action,key,kind:flag?'question':getChoiceKind(c),locked:c.locked,done:!!(flag&&state.interviews[flag]),primary:c.primary,group:c.group,image:actual.id==='hub'?photo?.image:null};};
+ TheatreUI.render({id,state,label,kind:actual.id==='hub'?'hub':person?'interview':location?'investigation':'detail',title,placeId,html:actual.html,person:person?actual.html:null,answer:inline,choices:actual.choices.map(toChoice),image:person?null:location?.image||'assets/moonlight-house-hero.png',spots:(sceneHotspots[actual.id]||[]).map(p=>({...p,done:p.found(),run:p.action,key:p.action.name})),objective:location?'현장에 남은 흔적을 직접 확인하세요.':null});
+ updateSceneVisual(id,label);saveState();if(id==='solve')TheatreUI.enhanceSolve();
+}
+function frameRecords(){
+ const e=TheatreUI.escape;const known=state.clues.map(n=>({id:n,name:frameTitles[n-1]||'단서 '+n,text:clues[n]}));
+ const statements=Object.entries(window.CASE001_STATEMENTS).filter(([name])=>state.interviews[name[3].toLowerCase()+name.slice(4)]).map(([name,s])=>{const t=document.createElement('div');t.innerHTML=s.html;const q=t.querySelector('.dialogue--detective');q?.querySelector('span')?.remove();const person=framePeople.find(p=>s.id.startsWith(p.id+'-'));return {name:person?.name||'인물',question:q?.innerHTML||'확인한 진술',html:frameAnswer(s.html)};});
+ return {clues:known,people:framePeople.map(p=>({...p,html:`<p>${state.visited[p.id]?'대화를 시작한 인물입니다. 확인한 진술을 아래에서 다시 읽을 수 있습니다.':'아직 대화를 시작하지 않았습니다.'}</p>`+statements.filter(s=>s.name===p.name).map(s=>`<div class="linked-clue"><b>${s.question}</b>${s.html}</div>`).join('')})),places:frameLocations().map(p=>({...p,role:p.visited?'방문한 장소':'조사 가능한 장소',html:`<p>${e(p.description)}</p>`+known.filter(c=>p.clueIds.includes(c.id)).map(c=>`<div class="linked-clue"><b>${e(c.name)}</b><small>${e(c.text)}</small></div>`).join('')})),statements,timeline:[{time:'20:41',text:'음악실 잠김'},{time:'20:58',text:'마스터카드로 열림'},{time:'20:59',text:'다시 잠김'},{time:'21:10',text:'악보 7페이지 실종 확인'}]};
+}
+TheatreUI.setup({caseId:'CASE 001',title:'달빛 악보 실종사건',detective:'assets/portrait-detective-v3.png',locations:frameLocations,people:()=>framePeople,records:frameRecords,hub:investigationHub,solve:finalSolve});
+$("#brandLink").addEventListener('click',event=>{event.preventDefault();if(state.started)investigationHub();else intro();});
+
 
 $("#notebookBtn").addEventListener("click",openNotebook);
 $("#suspectBtn").addEventListener("click",openSuspects);
